@@ -43,6 +43,7 @@ import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
+import { timingSafeEqual } from 'node:crypto';
 import cesium from 'vite-plugin-cesium';
 import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
 import {
@@ -7324,6 +7325,34 @@ function normalizeAisTimestamp(value) {
 }
 
 /**
+ * HTTP Basic Auth gate. When ADMIN_EMAIL and ADMIN_PASSWORD are both set, every
+ * request (static app AND the key-brokering /api proxies) must present matching
+ * credentials — email as the username. Registered first and immediately (not via
+ * a returned post-hook) so it runs before Vite's static/proxy middleware.
+ *
+ * Unset either var and the gate is off (local dev convenience). Credentials
+ * travel in plaintext under HTTP Basic — the deploy host MUST serve HTTPS.
+ */
+function adminGate() {
+  const gate = (server) => {
+    const email = process.env.ADMIN_EMAIL || '';
+    const password = process.env.ADMIN_PASSWORD || '';
+    if (!email || !password) return;
+    const expected = Buffer.from('Basic ' + Buffer.from(`${email}:${password}`).toString('base64'));
+    server.middlewares.use((req, res, next) => {
+      const got = Buffer.from(req.headers.authorization || '');
+      // ponytail: length guard first (timingSafeEqual throws on mismatch); leaks
+      // only credential length, negligible.
+      if (got.length === expected.length && timingSafeEqual(got, expected)) return next();
+      res.statusCode = 401;
+      res.setHeader('WWW-Authenticate', 'Basic realm="God\'s Eye View", charset="UTF-8"');
+      res.end('Authentication required');
+    });
+  };
+  return { name: 'admin-gate', configureServer: gate, configurePreviewServer: gate };
+}
+
+/**
  * Main Vite configuration factory.
  *
  * Loads .env files via Vite's loadEnv, registers Cesium + local proxy
@@ -7340,6 +7369,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...process.env };
   return {
     plugins: [
+      adminGate(),
       cesium(),
       openSkyProxy(),
       celestrakProxy(),
@@ -7368,6 +7398,17 @@ export default defineConfig(({ mode }) => {
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
         : ['localhost', '127.0.0.1', '.local'],
+    },
+    // Production server (`vite preview`) for a Node host like Render. Vite blocks
+    // unknown Host headers, so allow the platform's external hostname. Render
+    // sets RENDER_EXTERNAL_HOSTNAME; PREVIEW_ALLOWED_HOSTS (comma-separated) is a
+    // generic override. Falls back to local names for `npm run preview` locally.
+    preview: {
+      allowedHosts: env.RENDER_EXTERNAL_HOSTNAME
+        ? [env.RENDER_EXTERNAL_HOSTNAME]
+        : (env.PREVIEW_ALLOWED_HOSTS
+          ? env.PREVIEW_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter(Boolean)
+          : ['localhost', '127.0.0.1', '.local']),
     },
     // Expose selected API keys to the browser via import.meta.env.*
     define: {

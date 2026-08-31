@@ -1,0 +1,38 @@
+# Render Blueprint. New > Blueprint, point at this repo. Secrets (sync: false)
+# are entered in the dashboard, never committed. See .env.example for the full
+# key list; add any layer you use as another sync:false env var here.
+services:
+  - type: web
+    name: gods-eye-view
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    # Bind all interfaces + Render's $PORT. allowedHosts is handled in
+    # vite.config.js via RENDER_EXTERNAL_HOSTNAME (auto-set by Render).
+    startCommand: npm run preview -- --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      # Admin gate (both required to lock the site). HTTPS is provided by Render.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Required for the photorealistic globe.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      # Optional layers — set the ones you use, delete the rest.
+      - key: CESIUM_ION_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AISSTREAM_API_KEY
+        sync: false
+      - key: FIRMS_MAP_KEY
+        sync: false
+      - key: TOMTOM_API_KEY
+        sync: false
+      - key: OPENSKY_CLIENT_ID
+        sync: false
+      - key: OPENSKY_CLIENT_SECRET
+        sync: false
